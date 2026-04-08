@@ -1,0 +1,9 @@
+# .gitignore for .NET Core / WinForms
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+build_temp/
