@@ -40,6 +40,8 @@
             label7 = new Label();
             radioButton2 = new RadioButton();
             radioButton1 = new RadioButton();
+            groupBox1 = new GroupBox();
+            groupBox2 = new GroupBox();
             label6 = new Label();
             label5 = new Label();
             label3 = new Label();
@@ -49,6 +51,8 @@
             label1 = new Label();
             textBox1 = new TextBox();
             ((System.ComponentModel.ISupportInitialize)pictureBox4).BeginInit();
+            groupBox1.SuspendLayout();
+            groupBox2.SuspendLayout();
             SuspendLayout();
             // 
             // pictureBox4
@@ -71,10 +75,10 @@
             // radioButton3
             // 
             radioButton3.AutoSize = true;
-            radioButton3.Location = new Point(241, 306);
+            radioButton3.Location = new Point(172, 26);
             radioButton3.Name = "radioButton3";
             radioButton3.Size = new Size(41, 19);
-            radioButton3.TabIndex = 60;
+            radioButton3.TabIndex = 2;
             radioButton3.TabStop = true;
             radioButton3.Text = "No";
             radioButton3.UseVisualStyleBackColor = true;
@@ -82,10 +86,10 @@
             // radioButton4
             // 
             radioButton4.AutoSize = true;
-            radioButton4.Location = new Point(153, 306);
+            radioButton4.Location = new Point(84, 26);
             radioButton4.Name = "radioButton4";
             radioButton4.Size = new Size(42, 19);
-            radioButton4.TabIndex = 59;
+            radioButton4.TabIndex = 1;
             radioButton4.TabStop = true;
             radioButton4.Text = "Yes";
             radioButton4.UseVisualStyleBackColor = true;
@@ -93,24 +97,24 @@
             // label9
             // 
             label9.AutoSize = true;
-            label9.Location = new Point(83, 288);
+            label9.Location = new Point(8, 8);
             label9.Name = "label9";
-            label9.Size = new Size(181, 15);
-            label9.TabIndex = 58;
-            label9.Text = "Was there missing or Trap inside?";
+            label9.Size = new Size(136, 15);
+            label9.TabIndex = 0;
+            label9.Text = "Is the patient conscious?";
             // 
             // textBox5
             // 
-            textBox5.Location = new Point(136, 262);
+            textBox5.Location = new Point(124, 244);
             textBox5.Name = "textBox5";
-            textBox5.PlaceholderText = "Theft/Robbery/Holdap";
+            textBox5.PlaceholderText = "MCI/Collision/Self";
             textBox5.Size = new Size(170, 23);
             textBox5.TabIndex = 57;
             // 
             // label8
             // 
             label8.AutoSize = true;
-            label8.Location = new Point(24, 265);
+            label8.Location = new Point(12, 247);
             label8.Name = "label8";
             label8.Size = new Size(106, 15);
             label8.TabIndex = 56;
@@ -128,19 +132,19 @@
             // label7
             // 
             label7.AutoSize = true;
-            label7.Location = new Point(83, 328);
+            label7.Location = new Point(8, 8);
             label7.Name = "label7";
-            label7.Size = new Size(223, 15);
-            label7.TabIndex = 54;
-            label7.Text = "Suspected Fire for Hazardous Chemicals?";
+            label7.Size = new Size(157, 15);
+            label7.TabIndex = 0;
+            label7.Text = "Is there any severe bleeding?";
             // 
             // radioButton2
             // 
             radioButton2.AutoSize = true;
-            radioButton2.Location = new Point(241, 346);
+            radioButton2.Location = new Point(172, 26);
             radioButton2.Name = "radioButton2";
             radioButton2.Size = new Size(41, 19);
-            radioButton2.TabIndex = 53;
+            radioButton2.TabIndex = 2;
             radioButton2.TabStop = true;
             radioButton2.Text = "No";
             radioButton2.UseVisualStyleBackColor = true;
@@ -148,20 +152,42 @@
             // radioButton1
             // 
             radioButton1.AutoSize = true;
-            radioButton1.Location = new Point(153, 346);
+            radioButton1.Location = new Point(84, 26);
             radioButton1.Name = "radioButton1";
             radioButton1.Size = new Size(42, 19);
-            radioButton1.TabIndex = 52;
+            radioButton1.TabIndex = 1;
             radioButton1.TabStop = true;
             radioButton1.Text = "Yes";
             radioButton1.UseVisualStyleBackColor = true;
+            // 
+            // groupBox1
+            // 
+            groupBox1.Controls.Add(radioButton3);
+            groupBox1.Controls.Add(radioButton4);
+            groupBox1.Controls.Add(label9);
+            groupBox1.Location = new Point(70, 268);
+            groupBox1.Name = "groupBox1";
+            groupBox1.Size = new Size(270, 50);
+            groupBox1.TabIndex = 58;
+            groupBox1.TabStop = false;
+            // 
+            // groupBox2
+            // 
+            groupBox2.Controls.Add(radioButton2);
+            groupBox2.Controls.Add(radioButton1);
+            groupBox2.Controls.Add(label7);
+            groupBox2.Location = new Point(70, 324);
+            groupBox2.Name = "groupBox2";
+            groupBox2.Size = new Size(270, 50);
+            groupBox2.TabIndex = 59;
+            groupBox2.TabStop = false;
             // 
             // label6
             // 
             label6.AutoSize = true;
             label6.Font = new Font("Rockwell", 50F, FontStyle.Bold);
             label6.ForeColor = Color.Red;
-            label6.Location = new Point(126, 359);
+            label6.Location = new Point(124, 372);
             label6.Name = "label6";
             label6.Size = new Size(146, 82);
             label6.TabIndex = 51;
@@ -234,15 +260,11 @@
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(395, 450);
             Controls.Add(dateTimePicker1);
-            Controls.Add(radioButton3);
-            Controls.Add(radioButton4);
-            Controls.Add(label9);
             Controls.Add(textBox5);
             Controls.Add(label8);
             Controls.Add(button1);
-            Controls.Add(label7);
-            Controls.Add(radioButton2);
-            Controls.Add(radioButton1);
+            Controls.Add(groupBox2);
+            Controls.Add(groupBox1);
             Controls.Add(label6);
             Controls.Add(label5);
             Controls.Add(label3);
@@ -255,6 +277,10 @@
             Name = "Form6";
             Text = "Form6";
             ((System.ComponentModel.ISupportInitialize)pictureBox4).EndInit();
+            groupBox1.ResumeLayout(false);
+            groupBox1.PerformLayout();
+            groupBox2.ResumeLayout(false);
+            groupBox2.PerformLayout();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -272,6 +298,8 @@
         private Label label7;
         private RadioButton radioButton2;
         private RadioButton radioButton1;
+        private GroupBox groupBox1;
+        private GroupBox groupBox2;
         private Label label6;
         private Label label5;
         private Label label3;

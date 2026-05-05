@@ -48,8 +48,64 @@ namespace Incri1_Galang
             }
             else
             {
+                try
+                {
+                    BarangayUserDatabase.Initialize();
+                    if (BarangayUserDatabase.TryGetBarangayForUser(user, pass, out string barangayName, out _))
+                    {
+                        MessageBox.Show("Barangay Access Granted. Opening Barangay Dashboard...", "Success",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                        this.Hide();
+                        using (Form15 barangayDashboard = new Form15())
+                        {
+                            barangayDashboard.ShowDialog(this);
+                        }
+
+                        textBox1.Clear();
+                        this.Show();
+                        this.Activate();
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Barangay login failed. " + ex.Message, "Database Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    textBox1.Clear();
+                    return;
+                }
+
+                try
+                {
+                    UserDatabase.Initialize();
+                    if (UserDatabase.ValidateUser(user, pass))
+                    {
+                        MessageBox.Show("Resident Access Granted. Opening Report Menu...", "Success",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                        this.Hide();
+                        using (Form3 residentMenu = new Form3())
+                        {
+                            residentMenu.ShowDialog(this);
+                        }
+
+                        textBox1.Clear();
+                        this.Show();
+                        this.Activate();
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Login failed. " + ex.Message, "Database Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    textBox1.Clear();
+                    return;
+                }
+
                 // Logic for failed login
-                MessageBox.Show("Invalid Admin credentials. Please try again.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Invalid credentials. Please try again.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 textBox1.Clear(); // Clear password for security
             }
         }
@@ -57,8 +113,20 @@ namespace Incri1_Galang
         // --- THIS IS THE FIX TO CONNECT TO FORM2 ---
         private void btnRegister_Click(object? sender, EventArgs e)
         {
-            // 1. Create an instance of Form2
-            Form2 registrationForm = new Form2();
+            bool registerAsResident = radioButton1radioButton1.Checked;
+            bool registerAsBarangay = radioButton1.Checked;
+
+            if (!registerAsResident && !registerAsBarangay)
+            {
+                MessageBox.Show("Please choose Resident or Barangay before registering.",
+                    "Registration Type", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 1. Create the correct registration form
+            Form registrationForm = registerAsBarangay
+                ? new Form17()
+                : new Form2();
 
             // 2. Hide Form1 so it's not in the way
             this.Hide();
@@ -70,5 +138,6 @@ namespace Incri1_Galang
             // 4. After Form2 is closed, show Form1 again so they can log in
             this.Show();
         }
+
     }
 }

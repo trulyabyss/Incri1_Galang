@@ -1,67 +1,112 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Data.OleDb;
 using System.IO;
-using Microsoft.Data.Sqlite;
 
 namespace Incri1_Galang
 {
     internal static class UnitDatabase
     {
-        private static readonly string DbPath = Path.Combine(AppContext.BaseDirectory, "incri1_galang.db");
-        private static string ConnectionString => $"Data Source={DbPath}";
+        internal const string ApplicationTableName = "AppResponseUnits";
+        internal const string ReportsTableName = "ResidentReports";
+
+        public static event EventHandler? DataChanged;
+
+        private static readonly string[] AccessProviderCandidates =
+        {
+            "Microsoft.ACE.OLEDB.16.0",
+            "Microsoft.ACE.OLEDB.12.0"
+        };
+
+        private static readonly string[] AccessDatabaseCandidatePaths =
+        {
+            Path.Combine(AppContext.BaseDirectory, "DatabaseDispatch.accdb"),
+            Path.Combine(AppContext.BaseDirectory, "data", "DatabaseDispatch.accdb"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DatabaseDispatch.accdb"))
+        };
+
+        private static readonly HashSet<string> RequiredColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "UnitID",
+            "UnitName",
+            "UnitType",
+            "Status",
+            "Location",
+            "DateAdded",
+            "Resources",
+            "IncidentLocation",
+            "AlarmDescription"
+        };
 
         public static void Initialize()
         {
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            using OleDbConnection connection = OpenAccessConnection();
+            EnsureTable(connection, ApplicationTableName);
+            EnsureTable(connection, ReportsTableName);
+        }
 
-            string sql = @"
-                CREATE TABLE IF NOT EXISTS ResponseUnits (
-                    UnitID INTEGER PRIMARY KEY AUTOINCREMENT,
-                    UnitName TEXT NOT NULL,
-                    UnitType TEXT NOT NULL,
-                    Status TEXT NOT NULL,
-                    Location TEXT NOT NULL,
-                    DateAdded TEXT NOT NULL,
-                    Resources TEXT,
-                    IncidentLocation TEXT,
-                    AlarmDescription TEXT
-                );";
-
-            using SqliteCommand command = new SqliteCommand(sql, connection);
-            command.ExecuteNonQuery();
+        public static string GetResolvedDatabasePath()
+        {
+            return ResolveAccessDatabasePath();
         }
 
         public static List<ResponseUnit> GetAllUnits()
         {
+            return GetAllRows(ApplicationTableName);
+        }
+
+        public static List<ResponseUnit> GetAllReports()
+        {
+            return GetAllRows(ReportsTableName);
+        }
+
+        private static List<ResponseUnit> GetAllRows(string tableName)
+        {
             List<ResponseUnit> units = new List<ResponseUnit>();
 
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            using OleDbConnection connection = OpenAccessConnection();
 
-            string sql = @"
-                SELECT UnitID, UnitName, UnitType, Status, Location, DateAdded, Resources, IncidentLocation, AlarmDescription
-                FROM ResponseUnits
-                ORDER BY UnitID;";
+            string sql = $@"
+                SELECT [UnitID], [UnitName], [UnitType], [Status], [Location], [DateAdded], [Resources], [IncidentLocation], [AlarmDescription]
+                FROM [{tableName}]
+                ORDER BY [UnitID];";
 
-            using SqliteCommand command = new SqliteCommand(sql, connection);
-            using SqliteDataReader reader = command.ExecuteReader();
+            using OleDbCommand command = new OleDbCommand(sql, connection);
+            using OleDbDataReader reader = command.ExecuteReader();
+
+            if (reader == null)
+            {
+                return units;
+            }
 
             while (reader.Read())
             {
-                DateTime.TryParse(reader.GetString(5), out DateTime parsedDate);
+                DateTime parsedDate = DateTime.Now;
+                if (!reader.IsDBNull(5))
+                {
+                    object dateValue = reader.GetValue(5);
+                    if (dateValue is DateTime dt)
+                    {
+                        parsedDate = dt;
+                    }
+                    else if (DateTime.TryParse(dateValue?.ToString(), out DateTime parsed))
+                    {
+                        parsedDate = parsed;
+                    }
+                }
 
                 units.Add(new ResponseUnit
                 {
-                    UnitID = reader.GetInt32(0),
-                    UnitName = reader.GetString(1),
-                    UnitType = reader.GetString(2),
-                    Status = reader.GetString(3),
-                    Location = reader.GetString(4),
-                    DateAdded = parsedDate == default ? DateTime.Now : parsedDate,
-                    Resources = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                    IncidentLocation = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                    AlarmDescription = reader.IsDBNull(8) ? string.Empty : reader.GetString(8)
+                    UnitID = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0)),
+                    UnitName = reader.IsDBNull(1) ? string.Empty : reader.GetValue(1)?.ToString() ?? string.Empty,
+                    UnitType = reader.IsDBNull(2) ? string.Empty : reader.GetValue(2)?.ToString() ?? string.Empty,
+                    Status = reader.IsDBNull(3) ? string.Empty : reader.GetValue(3)?.ToString() ?? string.Empty,
+                    Location = reader.IsDBNull(4) ? string.Empty : reader.GetValue(4)?.ToString() ?? string.Empty,
+                    DateAdded = parsedDate,
+                    Resources = reader.IsDBNull(6) ? string.Empty : reader.GetValue(6)?.ToString() ?? string.Empty,
+                    IncidentLocation = reader.IsDBNull(7) ? string.Empty : reader.GetValue(7)?.ToString() ?? string.Empty,
+                    AlarmDescription = reader.IsDBNull(8) ? string.Empty : reader.GetValue(8)?.ToString() ?? string.Empty
                 });
             }
 
@@ -70,116 +115,292 @@ namespace Incri1_Galang
 
         public static int AddUnit(ResponseUnit unit)
         {
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            try
+            {
+                return AddRow(ApplicationTableName, unit);
+            }
+            catch (OleDbException ex) when (IsDataTypeMismatch(ex))
+            {
+                using OleDbConnection fixConnection = OpenAccessConnection();
+                RecreateTable(fixConnection, ApplicationTableName);
+                return AddRow(ApplicationTableName, unit);
+            }
+        }
 
-            string sql = @"
-                INSERT INTO ResponseUnits (UnitName, UnitType, Status, Location, DateAdded, Resources, IncidentLocation, AlarmDescription)
-                VALUES ($name, $type, $status, $location, $dateAdded, $resources, $incidentLocation, $alarmDescription);
-                SELECT last_insert_rowid();";
+        public static int AddReport(ResponseUnit report)
+        {
+            try
+            {
+                return AddRow(ReportsTableName, report);
+            }
+            catch (OleDbException ex) when (IsDataTypeMismatch(ex))
+            {
+                using OleDbConnection fixConnection = OpenAccessConnection();
+                RecreateTable(fixConnection, ReportsTableName);
+                return AddRow(ReportsTableName, report);
+            }
+        }
 
-            using SqliteCommand command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("$name", unit.UnitName);
-            command.Parameters.AddWithValue("$type", unit.UnitType);
-            command.Parameters.AddWithValue("$status", unit.Status);
-            command.Parameters.AddWithValue("$location", unit.Location);
-            command.Parameters.AddWithValue("$dateAdded", unit.DateAdded.ToString("o"));
-            command.Parameters.AddWithValue("$resources", unit.Resources);
-            command.Parameters.AddWithValue("$incidentLocation", unit.IncidentLocation);
-            command.Parameters.AddWithValue("$alarmDescription", unit.AlarmDescription);
+        private static int AddRow(string tableName, ResponseUnit unit)
+        {
+            using OleDbConnection connection = OpenAccessConnection();
 
-            long insertedId = (long)command.ExecuteScalar()!;
-            return (int)insertedId;
+            string sql = $@"
+                INSERT INTO [{tableName}] ([UnitName], [UnitType], [Status], [Location], [DateAdded], [Resources], [IncidentLocation], [AlarmDescription])
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+
+            using OleDbCommand command = new OleDbCommand(sql, connection);
+            command.Parameters.Add("@p1", OleDbType.VarWChar, 255).Value = unit.UnitName;
+            command.Parameters.Add("@p2", OleDbType.VarWChar, 255).Value = unit.UnitType;
+            command.Parameters.Add("@p3", OleDbType.VarWChar, 255).Value = unit.Status;
+            command.Parameters.Add("@p4", OleDbType.VarWChar, 255).Value = unit.Location;
+            command.Parameters.Add("@p5", OleDbType.Date).Value = unit.DateAdded;
+            command.Parameters.Add("@p6", OleDbType.LongVarWChar).Value = unit.Resources ?? string.Empty;
+            command.Parameters.Add("@p7", OleDbType.LongVarWChar).Value = unit.IncidentLocation ?? string.Empty;
+            command.Parameters.Add("@p8", OleDbType.LongVarWChar).Value = unit.AlarmDescription ?? string.Empty;
+            command.ExecuteNonQuery();
+
+            using OleDbCommand idCommand = new OleDbCommand("SELECT @@IDENTITY;", connection);
+            object? insertedId = idCommand.ExecuteScalar();
+            int newId = insertedId == null || insertedId == DBNull.Value ? 0 : Convert.ToInt32(insertedId);
+            RaiseDataChanged();
+            return newId;
         }
 
         public static void UpdateUnit(ResponseUnit unit)
         {
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            UpdateRow(ApplicationTableName, unit);
+        }
 
-            string sql = @"
-                UPDATE ResponseUnits
-                SET UnitName = $name,
-                    UnitType = $type,
-                    Status = $status,
-                    Location = $location,
-                    DateAdded = $dateAdded,
-                    Resources = $resources,
-                    IncidentLocation = $incidentLocation,
-                    AlarmDescription = $alarmDescription
-                WHERE UnitID = $unitId;";
+        public static void UpdateReport(ResponseUnit report)
+        {
+            UpdateRow(ReportsTableName, report);
+        }
 
-            using SqliteCommand command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("$name", unit.UnitName);
-            command.Parameters.AddWithValue("$type", unit.UnitType);
-            command.Parameters.AddWithValue("$status", unit.Status);
-            command.Parameters.AddWithValue("$location", unit.Location);
-            command.Parameters.AddWithValue("$dateAdded", unit.DateAdded.ToString("o"));
-            command.Parameters.AddWithValue("$resources", unit.Resources);
-            command.Parameters.AddWithValue("$incidentLocation", unit.IncidentLocation);
-            command.Parameters.AddWithValue("$alarmDescription", unit.AlarmDescription);
-            command.Parameters.AddWithValue("$unitId", unit.UnitID);
+        private static void UpdateRow(string tableName, ResponseUnit unit)
+        {
+            using OleDbConnection connection = OpenAccessConnection();
+
+            string sql = $@"
+                UPDATE [{tableName}]
+                SET [UnitName] = ?,
+                    [UnitType] = ?,
+                    [Status] = ?,
+                    [Location] = ?,
+                    [DateAdded] = ?,
+                    [Resources] = ?,
+                    [IncidentLocation] = ?,
+                    [AlarmDescription] = ?
+                WHERE [UnitID] = ?;";
+
+            using OleDbCommand command = new OleDbCommand(sql, connection);
+            command.Parameters.Add("@p1", OleDbType.VarWChar, 255).Value = unit.UnitName;
+            command.Parameters.Add("@p2", OleDbType.VarWChar, 255).Value = unit.UnitType;
+            command.Parameters.Add("@p3", OleDbType.VarWChar, 255).Value = unit.Status;
+            command.Parameters.Add("@p4", OleDbType.VarWChar, 255).Value = unit.Location;
+            command.Parameters.Add("@p5", OleDbType.Date).Value = unit.DateAdded;
+            command.Parameters.Add("@p6", OleDbType.LongVarWChar).Value = unit.Resources ?? string.Empty;
+            command.Parameters.Add("@p7", OleDbType.LongVarWChar).Value = unit.IncidentLocation ?? string.Empty;
+            command.Parameters.Add("@p8", OleDbType.LongVarWChar).Value = unit.AlarmDescription ?? string.Empty;
+            command.Parameters.Add("@p9", OleDbType.Integer).Value = unit.UnitID;
             command.ExecuteNonQuery();
+            RaiseDataChanged();
         }
 
         public static void DeleteUnit(int unitId)
         {
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            DeleteRow(ApplicationTableName, unitId);
+        }
 
-            string sql = "DELETE FROM ResponseUnits WHERE UnitID = $unitId;";
-            using SqliteCommand command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("$unitId", unitId);
+        public static void DeleteReport(int reportId)
+        {
+            DeleteRow(ReportsTableName, reportId);
+        }
+
+        private static void DeleteRow(string tableName, int unitId)
+        {
+            using OleDbConnection connection = OpenAccessConnection();
+
+            string sql = $"DELETE FROM [{tableName}] WHERE [UnitID] = ?;";
+            using OleDbCommand command = new OleDbCommand(sql, connection);
+            command.Parameters.Add("@p1", OleDbType.Integer).Value = unitId;
             command.ExecuteNonQuery();
+            RaiseDataChanged();
         }
 
         public static void ReplaceAllUnits(IEnumerable<ResponseUnit> units)
         {
-            using SqliteConnection connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            using OleDbConnection connection = OpenAccessConnection();
+            using OleDbTransaction transaction = connection.BeginTransaction();
 
-            using SqliteTransaction transaction = connection.BeginTransaction();
-
-            using (SqliteCommand clearCommand = new SqliteCommand("DELETE FROM ResponseUnits;", connection, transaction))
+            using (OleDbCommand clearCommand = new OleDbCommand($"DELETE FROM [{ApplicationTableName}];", connection, transaction))
             {
                 clearCommand.ExecuteNonQuery();
             }
 
-            // Reset the AUTOINCREMENT counter so imported UnitIDs start at 1 in sequence.
-            using (SqliteCommand resetSequence = new SqliteCommand("DELETE FROM sqlite_sequence WHERE name = 'ResponseUnits';", connection, transaction))
-            {
-                resetSequence.ExecuteNonQuery();
-            }
+            string insertSql = $@"
+                INSERT INTO [{ApplicationTableName}] ([UnitName], [UnitType], [Status], [Location], [DateAdded], [Resources], [IncidentLocation], [AlarmDescription])
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
 
-            const string insertSql = @"
-                INSERT INTO ResponseUnits (UnitID, UnitName, UnitType, Status, Location, DateAdded, Resources, IncidentLocation, AlarmDescription)
-                VALUES ($unitId, $name, $type, $status, $location, $dateAdded, $resources, $incidentLocation, $alarmDescription);";
-
-            int nextUnitId = 1;
             foreach (ResponseUnit unit in units)
             {
-                using SqliteCommand insertCommand = new SqliteCommand(insertSql, connection, transaction);
-                insertCommand.Parameters.AddWithValue("$unitId", nextUnitId);
-                insertCommand.Parameters.AddWithValue("$name", unit.UnitName);
-                insertCommand.Parameters.AddWithValue("$type", unit.UnitType);
-                insertCommand.Parameters.AddWithValue("$status", unit.Status);
-                insertCommand.Parameters.AddWithValue("$location", unit.Location);
-                insertCommand.Parameters.AddWithValue("$dateAdded", unit.DateAdded.ToString("o"));
-                insertCommand.Parameters.AddWithValue("$resources", unit.Resources);
-                insertCommand.Parameters.AddWithValue("$incidentLocation", unit.IncidentLocation);
-                insertCommand.Parameters.AddWithValue("$alarmDescription", unit.AlarmDescription);
+                using OleDbCommand insertCommand = new OleDbCommand(insertSql, connection, transaction);
+                insertCommand.Parameters.Add("@p1", OleDbType.VarWChar, 255).Value = unit.UnitName;
+                insertCommand.Parameters.Add("@p2", OleDbType.VarWChar, 255).Value = unit.UnitType;
+                insertCommand.Parameters.Add("@p3", OleDbType.VarWChar, 255).Value = unit.Status;
+                insertCommand.Parameters.Add("@p4", OleDbType.VarWChar, 255).Value = unit.Location;
+                insertCommand.Parameters.Add("@p5", OleDbType.Date).Value = unit.DateAdded;
+                insertCommand.Parameters.Add("@p6", OleDbType.LongVarWChar).Value = unit.Resources ?? string.Empty;
+                insertCommand.Parameters.Add("@p7", OleDbType.LongVarWChar).Value = unit.IncidentLocation ?? string.Empty;
+                insertCommand.Parameters.Add("@p8", OleDbType.LongVarWChar).Value = unit.AlarmDescription ?? string.Empty;
                 insertCommand.ExecuteNonQuery();
-                nextUnitId++;
-            }
-
-            int maxInsertedId = nextUnitId - 1;
-            using (SqliteCommand saveSequence = new SqliteCommand("INSERT INTO sqlite_sequence(name, seq) VALUES ('ResponseUnits', $seq);", connection, transaction))
-            {
-                saveSequence.Parameters.AddWithValue("$seq", maxInsertedId);
-                saveSequence.ExecuteNonQuery();
             }
 
             transaction.Commit();
+            RaiseDataChanged();
+        }
+
+        private static void RaiseDataChanged()
+        {
+            DataChanged?.Invoke(null, EventArgs.Empty);
+        }
+
+        public static OleDbConnection CreateOpenConnection()
+        {
+            return OpenAccessConnection();
+        }
+
+        private static OleDbConnection OpenAccessConnection()
+        {
+            string databasePath = ResolveAccessDatabasePath();
+            Exception? lastError = null;
+
+            foreach (string provider in AccessProviderCandidates)
+            {
+                string connectionString = $"Provider={provider};Data Source={databasePath};Persist Security Info=False;";
+                OleDbConnection connection = new OleDbConnection(connectionString);
+
+                try
+                {
+                    connection.Open();
+                    return connection;
+                }
+                catch (Exception ex)
+                {
+                    connection.Dispose();
+                    lastError = ex;
+                }
+            }
+
+            string errorMessage = "Microsoft Access provider was not found for this app process. Install Microsoft Access Database Engine matching app bitness (x86 app -> x86 engine).";
+            if (lastError != null)
+            {
+                errorMessage += "\n\nLast provider error: " + lastError.Message;
+            }
+
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        private static string ResolveAccessDatabasePath()
+        {
+            foreach (string candidate in AccessDatabaseCandidatePaths)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            throw new FileNotFoundException(
+                "Access database file was not found. Expected one of: " + string.Join(" | ", AccessDatabaseCandidatePaths));
+        }
+
+        private static bool TableExists(OleDbConnection connection, string tableName)
+        {
+            DataTable? tables = connection.GetOleDbSchemaTable(
+                OleDbSchemaGuid.Tables,
+                new object?[] { null, null, tableName, "TABLE" });
+
+            return tables != null && tables.Rows.Count > 0;
+        }
+
+        private static void EnsureTable(OleDbConnection connection, string tableName)
+        {
+            if (TableExists(connection, tableName))
+            {
+                if (!HasSchema(connection, tableName))
+                {
+                    RecreateTable(connection, tableName);
+                }
+                return;
+            }
+
+            CreateTable(connection, tableName);
+        }
+
+        private static bool HasSchema(OleDbConnection connection, string tableName)
+        {
+            DataTable? columns = connection.GetOleDbSchemaTable(
+                OleDbSchemaGuid.Columns,
+                new object?[] { null, null, tableName, null });
+
+            if (columns == null)
+            {
+                return false;
+            }
+
+            HashSet<string> actualColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in columns.Rows)
+            {
+                string? name = row["COLUMN_NAME"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    actualColumns.Add(name);
+                }
+            }
+
+            return RequiredColumns.IsSubsetOf(actualColumns);
+        }
+
+        private static void RecreateTable(OleDbConnection connection, string tableName)
+        {
+            using (OleDbCommand drop = new OleDbCommand($"DROP TABLE [{tableName}];", connection))
+            {
+                try
+                {
+                    drop.ExecuteNonQuery();
+                }
+                catch
+                {
+                    // Ignore when table cannot be dropped in the current state.
+                }
+            }
+
+            CreateTable(connection, tableName);
+        }
+
+        private static void CreateTable(OleDbConnection connection, string tableName)
+        {
+            string sql = $@"
+                CREATE TABLE [{tableName}] (
+                    [UnitID] COUNTER PRIMARY KEY,
+                    [UnitName] TEXT(255) NOT NULL,
+                    [UnitType] TEXT(255) NOT NULL,
+                    [Status] TEXT(255) NOT NULL,
+                    [Location] TEXT(255) NOT NULL,
+                    [DateAdded] DATETIME NOT NULL,
+                    [Resources] LONGTEXT,
+                    [IncidentLocation] LONGTEXT,
+                    [AlarmDescription] LONGTEXT
+                );";
+
+            using OleDbCommand command = new OleDbCommand(sql, connection);
+            command.ExecuteNonQuery();
+        }
+
+        private static bool IsDataTypeMismatch(OleDbException ex)
+        {
+            return ex.Message.IndexOf("Data type mismatch", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

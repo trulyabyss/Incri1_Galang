@@ -1,57 +1,68 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using GMap.NET;
-using GMap.NET.MapProviders;
-using GMap.NET.WindowsForms;
-using GMap.NET.WindowsForms.Markers;
+using Microsoft.Web.WebView2.Core;
 
 namespace Incri1_Galang
 {
     public partial class Form11 : Form
     {
+        private const string OsmUserAgent = "Incri1GalangApp/1.0 (mailto:mvincenttttt@gmail.com)";
+        private const string MapHtmlTemplate = "<!DOCTYPE html>\n" +
+            "<html>\n" +
+            "<head>\n" +
+            "  <meta charset='utf-8' />\n" +
+            "  <meta name='viewport' content='initial-scale=1, maximum-scale=1, user-scalable=no' />\n" +
+            "  <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' " +
+            "integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=' crossorigin='' />\n" +
+            "  <style>html, body, #map { height: 100%; margin: 0; }</style>\n" +
+            "</head>\n" +
+            "<body>\n" +
+            "  <div id='map'></div>\n" +
+            "  <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' " +
+            "integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=' crossorigin=''></script>\n" +
+            "  <script>\n" +
+            "    const map = L.map('map').setView([10.3157, 123.8854], 12);\n" +
+            "    L.tileLayer('https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=__MAPTILER_KEY__', { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);\n" +
+            "    let marker = null;\n" +
+            "    window.setMarker = function(lat, lng, label) {\n" +
+            "      if (marker) { marker.setLatLng([lat, lng]); } else { marker = L.marker([lat, lng]).addTo(map); }\n" +
+            "      if (label) { marker.bindPopup(label).openPopup(); }\n" +
+            "    };\n" +
+            "    window.centerMap = function(lat, lng, zoom) {\n" +
+            "      const z = zoom || map.getZoom();\n" +
+            "      map.setView([lat, lng], z);\n" +
+            "    };\n" +
+            "    map.on('click', function(e) {\n" +
+            "      if (window.chrome && window.chrome.webview) {\n" +
+            "        window.chrome.webview.postMessage({ type: 'mapClick', lat: e.latlng.lat, lng: e.latlng.lng });\n" +
+            "      }\n" +
+            "    });\n" +
+            "  </script>\n" +
+            "</body>\n" +
+            "</html>";
+
         private static readonly HttpClient Http = new HttpClient();
         private readonly List<ResponseUnit> _units;
-        private readonly GMapOverlay _markersOverlay = new GMapOverlay("markers");
-        private readonly GMapOverlay _routesOverlay = new GMapOverlay("routes");
-        private PointLatLng? _pinnedIncidentPoint;
+        private GeoPoint? _pinnedIncidentPoint;
         private string _pinnedIncidentText = string.Empty;
+        private bool _mapReady;
+
+        private readonly record struct GeoPoint(double Lat, double Lng);
 
         public Form11(ResponseUnit? selectedUnit = null)
         {
             InitializeComponent();
             _units = Form7.GlobalUnitList.ToList();
 
-            // Use ArcGIS tiles to avoid OSM volunteer tile policy blocking (HTTP 418).
-            mapControl.MapProvider = ArcGIS_World_Street_MapProvider.Instance;
-            GMaps.Instance.Mode = AccessMode.ServerOnly;
-            mapControl.Manager.Mode = AccessMode.ServerOnly;
-
-            // Disable disk cache providers to avoid legacy serialization paths.
-            mapControl.Manager.PrimaryCache = null;
-            mapControl.Manager.SecondaryCache = null;
-
-            // Disable legacy cache engines in this older GMap package that rely on BinaryFormatter.
-            mapControl.Manager.UseRouteCache = false;
-            mapControl.Manager.UseDirectionsCache = false;
-            mapControl.Manager.UseGeocoderCache = false;
-            mapControl.Manager.UsePlacemarkCache = false;
-            mapControl.Manager.UseUrlCache = false;
-            mapControl.Manager.UseMemoryCache = true;
-            mapControl.CanDragMap = true;
-            mapControl.DragButton = MouseButtons.Left;
-            mapControl.MinZoom = 2;
-            mapControl.MaxZoom = 20;
-            mapControl.Zoom = 12;
-            mapControl.Position = new PointLatLng(10.3157, 123.8854); // Cebu City default
-            mapControl.Overlays.Add(_markersOverlay);
-            mapControl.Overlays.Add(_routesOverlay);
-            mapControl.MouseClick += mapControl_MouseClick;
+            lblRouteInfo.Text = "Click the map or press Enter to pin a location.";
+            txtIncidentLocation.KeyDown += HandleIncidentLocationKeyDown;
 
             comboUnits.DisplayMember = "UnitName";
             comboUnits.ValueMember = "UnitID";
@@ -68,31 +79,90 @@ namespace Incri1_Galang
                         : matched.IncidentLocation;
                 }
             }
+
+            Shown += HandleFormShown;
         }
 
-        private async void btnPlotRoute_Click(object sender, EventArgs e)
+        private async void HandleFormShown(object? sender, EventArgs e)
+        {
+            await InitializeMapAsync();
+        }
+
+        private async Task InitializeMapAsync()
+        {
+            try
+            {
+                await mapView.EnsureCoreWebView2Async();
+                mapView.CoreWebView2.WebMessageReceived += HandleWebMessageReceived;
+
+                string mapTilerApiKey = LoadMapTilerApiKey();
+                if (string.IsNullOrWhiteSpace(mapTilerApiKey))
+                {
+                    MessageBox.Show("Map tiles require a MapTiler API key. Set MAPTILER_API_KEY or appsettings.json -> MapTiler:ApiKey.",
+                        "Map Setup", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                mapView.NavigateToString(BuildMapHtml(mapTilerApiKey));
+                _mapReady = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to initialize the map view. " + ex.Message,
+                    "Map Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void HandleIncidentLocationKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            _ = PinLocationFromTextAsync();
+        }
+
+        private ResponseUnit? GetSelectedUnitOrWarn()
         {
             if (comboUnits.SelectedItem is not ResponseUnit selectedUnit)
             {
-                MessageBox.Show("Please select a unit.", "Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Please select a unit to save the incident.", "Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return null;
+            }
+
+            return selectedUnit;
+        }
+
+        private async Task PinLocationFromTextAsync()
+        {
+            ResponseUnit? selectedUnit = GetSelectedUnitOrWarn();
+            if (selectedUnit == null)
+            {
                 return;
             }
 
             string incidentText = txtIncidentLocation.Text.Trim();
             if (string.IsNullOrWhiteSpace(incidentText))
             {
-                MessageBox.Show("Please enter an incident location.", "Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Please enter a landmark to pin.", "Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtIncidentLocation.Focus();
                 return;
             }
 
             try
             {
-                btnPlotRoute.Enabled = false;
-                btnPlotRoute.Text = "Locating...";
+                lblRouteInfo.Text = "Pinning location...";
 
-                PointLatLng? unitPoint = await GeocodeAsync(selectedUnit.Location, null);
-                PointLatLng? incidentPoint;
+                GeoPoint? biasPoint = null;
+                if (!string.IsNullOrWhiteSpace(selectedUnit.Location))
+                {
+                    biasPoint = await GeocodeAsync(selectedUnit.Location, null);
+                }
+
+                GeoPoint? incidentPoint;
 
                 if (_pinnedIncidentPoint != null &&
                     string.Equals(_pinnedIncidentText, incidentText, StringComparison.OrdinalIgnoreCase))
@@ -101,13 +171,7 @@ namespace Incri1_Galang
                 }
                 else
                 {
-                    incidentPoint = await GeocodeAsync(incidentText, unitPoint);
-                }
-
-                if (unitPoint == null)
-                {
-                    MessageBox.Show("Unable to locate the unit station address.", "Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
+                    incidentPoint = await GeocodeAsync(incidentText, biasPoint);
                 }
 
                 if (incidentPoint == null)
@@ -116,152 +180,87 @@ namespace Incri1_Galang
                     return;
                 }
 
+                _pinnedIncidentPoint = incidentPoint;
+                _pinnedIncidentText = incidentText;
+
                 selectedUnit.IncidentLocation = incidentText;
                 UnitDatabase.UpdateUnit(selectedUnit);
 
-                DrawMarkers(selectedUnit, unitPoint.Value, incidentPoint.Value);
-                await DrawRouteAsync(unitPoint.Value, incidentPoint.Value);
+                await SetMarkerAsync(incidentPoint.Value, incidentText);
 
-                mapControl.Position = incidentPoint.Value;
-                mapControl.Zoom = Math.Max(mapControl.Zoom, 14);
+                lblRouteInfo.Text = "Pinned location on map.";
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Map request failed. {ex.Message}", "Map Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            finally
-            {
-                btnPlotRoute.Enabled = true;
-                btnPlotRoute.Text = "Plot Route";
-            }
         }
 
-        private void DrawMarkers(ResponseUnit unit, PointLatLng unitPoint, PointLatLng incidentPoint)
+        private async void HandleWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
-            _markersOverlay.Markers.Clear();
-            _routesOverlay.Routes.Clear();
-
-            GMarkerGoogle unitMarker = new GMarkerGoogle(unitPoint, GMarkerGoogleType.blue_dot)
+            try
             {
-                ToolTipText = $"Unit {unit.UnitID}: {unit.UnitName}\n{unit.Location}"
-            };
-
-            GMarkerGoogle incidentMarker = new GMarkerGoogle(incidentPoint, GMarkerGoogleType.red_dot)
-            {
-                ToolTipText = $"Incident\n{txtIncidentLocation.Text.Trim()}"
-            };
-
-            _markersOverlay.Markers.Add(unitMarker);
-            _markersOverlay.Markers.Add(incidentMarker);
-            mapControl.Refresh();
-        }
-
-        private async Task DrawRouteAsync(PointLatLng start, PointLatLng end)
-        {
-            string url = string.Format(
-                CultureInfo.InvariantCulture,
-                "https://router.project-osrm.org/route/v1/driving/{0},{1};{2},{3}?alternatives=true&overview=full&geometries=geojson&steps=false",
-                start.Lng,
-                start.Lat,
-                end.Lng,
-                end.Lat);
-
-            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, url);
-            using HttpResponseMessage response = await Http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            string json = await response.Content.ReadAsStringAsync();
-            using JsonDocument doc = JsonDocument.Parse(json);
-            JsonElement root = doc.RootElement;
-
-            if (!root.TryGetProperty("routes", out JsonElement routes) || routes.GetArrayLength() == 0)
-            {
-                lblRouteInfo.Text = "Distance: - | ETA: -";
-                return;
-            }
-
-            JsonElement? bestRoute = null;
-            double bestDuration = double.MaxValue;
-            double bestDistance = double.MaxValue;
-            int bestRouteIndex = 0;
-
-            int idx = 0;
-            foreach (JsonElement route in routes.EnumerateArray())
-            {
-                idx++;
-                double duration = route.GetProperty("duration").GetDouble();
-                double distance = route.GetProperty("distance").GetDouble();
-
-                if (duration < bestDuration || (Math.Abs(duration - bestDuration) < 0.1 && distance < bestDistance))
+                using JsonDocument doc = JsonDocument.Parse(e.WebMessageAsJson);
+                if (!doc.RootElement.TryGetProperty("type", out JsonElement typeElement))
                 {
-                    bestDuration = duration;
-                    bestDistance = distance;
-                    bestRoute = route;
-                    bestRouteIndex = idx;
+                    return;
                 }
+
+                string? type = typeElement.GetString();
+                if (!string.Equals(type, "mapClick", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                double lat = doc.RootElement.GetProperty("lat").GetDouble();
+                double lng = doc.RootElement.GetProperty("lng").GetDouble();
+                await HandleMapClickAsync(new GeoPoint(lat, lng));
             }
-
-            if (bestRoute == null)
+            catch
             {
-                lblRouteInfo.Text = "Distance: - | ETA: -";
-                return;
+                // Ignore malformed messages.
             }
-
-            List<PointLatLng> points = new List<PointLatLng>();
-            foreach (JsonElement coordinate in bestRoute.Value.GetProperty("geometry").GetProperty("coordinates").EnumerateArray())
-            {
-                double lng = coordinate[0].GetDouble();
-                double lat = coordinate[1].GetDouble();
-                points.Add(new PointLatLng(lat, lng));
-            }
-
-            if (points.Count == 0)
-            {
-                return;
-            }
-
-            GMapRoute gRoute = new GMapRoute(points, "unitRoute")
-            {
-                Stroke = new System.Drawing.Pen(System.Drawing.Color.Red, 3)
-            };
-
-            _routesOverlay.Routes.Add(gRoute);
-            mapControl.Position = end;
-            mapControl.Zoom = Math.Max(mapControl.Zoom, 14);
-
-            double distanceKm = bestDistance / 1000.0;
-            double durationMin = bestDuration / 60.0;
-            DateTime etaTime = DateTime.Now.AddSeconds(bestDuration);
-            lblRouteInfo.Text = $"Fastest route #{bestRouteIndex} | Distance: {distanceKm:F2} km | ETA: {durationMin:F0} min ({etaTime:hh:mm tt})";
-            mapControl.Refresh();
         }
 
-        private async void mapControl_MouseClick(object? sender, MouseEventArgs e)
+        private async Task HandleMapClickAsync(GeoPoint point)
         {
-            if (e.Button != MouseButtons.Left)
-            {
-                return;
-            }
+            _pinnedIncidentPoint = point;
 
-            PointLatLng clickedPoint = mapControl.FromLocalToLatLng(e.X, e.Y);
-            _pinnedIncidentPoint = clickedPoint;
-
-            string? resolved = await ReverseGeocodeAsync(clickedPoint);
+            string? resolved = await ReverseGeocodeAsync(point);
             if (string.IsNullOrWhiteSpace(resolved))
             {
-                resolved = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "Pinned: {0:F6}, {1:F6}",
-                    clickedPoint.Lat,
-                    clickedPoint.Lng);
+                resolved = string.Format(CultureInfo.InvariantCulture, "Pinned: {0:F6}, {1:F6}", point.Lat, point.Lng);
             }
 
             _pinnedIncidentText = resolved;
             txtIncidentLocation.Text = resolved;
-            lblRouteInfo.Text = "Pinned incident point from map. Click Plot Route to compute fastest path.";
+
+            ResponseUnit? selectedUnit = GetSelectedUnitOrWarn();
+            if (selectedUnit != null)
+            {
+                selectedUnit.IncidentLocation = resolved;
+                UnitDatabase.UpdateUnit(selectedUnit);
+            }
+
+            await SetMarkerAsync(point, resolved);
+            lblRouteInfo.Text = "Pinned location on map.";
         }
 
-        private async Task<string?> ReverseGeocodeAsync(PointLatLng point)
+        private async Task SetMarkerAsync(GeoPoint point, string label)
+        {
+            if (!_mapReady || mapView.CoreWebView2 == null)
+            {
+                return;
+            }
+
+            string lat = point.Lat.ToString(CultureInfo.InvariantCulture);
+            string lng = point.Lng.ToString(CultureInfo.InvariantCulture);
+            string safeLabel = JsonSerializer.Serialize(label ?? string.Empty);
+            string script = $"window.setMarker({lat}, {lng}, {safeLabel}); window.centerMap({lat}, {lng}, 14);";
+            await mapView.CoreWebView2.ExecuteScriptAsync(script);
+        }
+
+        private async Task<string?> ReverseGeocodeAsync(GeoPoint point)
         {
             string url = string.Format(
                 CultureInfo.InvariantCulture,
@@ -270,7 +269,7 @@ namespace Incri1_Galang
                 point.Lng);
 
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd("Incri1GalangApp/1.0 (student project)");
+            request.Headers.UserAgent.ParseAdd(OsmUserAgent);
 
             using HttpResponseMessage response = await Http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
@@ -293,7 +292,7 @@ namespace Incri1_Galang
             return null;
         }
 
-        private async Task<PointLatLng?> GeocodeAsync(string query, PointLatLng? biasPoint)
+        private async Task<GeoPoint?> GeocodeAsync(string query, GeoPoint? biasPoint)
         {
             if (string.IsNullOrWhiteSpace(query))
             {
@@ -302,7 +301,7 @@ namespace Incri1_Galang
 
             foreach (string candidate in BuildQueryCandidates(query))
             {
-                PointLatLng? point = await GeocodeSingleQueryAsync(candidate, biasPoint);
+                GeoPoint? point = await GeocodeSingleQueryAsync(candidate, biasPoint);
                 if (point != null)
                 {
                     return point;
@@ -312,12 +311,12 @@ namespace Incri1_Galang
             return null;
         }
 
-        private async Task<PointLatLng?> GeocodeSingleQueryAsync(string query, PointLatLng? biasPoint)
+        private async Task<GeoPoint?> GeocodeSingleQueryAsync(string query, GeoPoint? biasPoint)
         {
             string url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=ph&q=" + Uri.EscapeDataString(query);
 
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd("Incri1GalangApp/1.0 (student project)");
+            request.Headers.UserAgent.ParseAdd(OsmUserAgent);
 
             using HttpResponseMessage response = await Http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
@@ -333,7 +332,7 @@ namespace Incri1_Galang
                 return null;
             }
 
-            PointLatLng? bestPoint = null;
+            GeoPoint? bestPoint = null;
             double bestDistance = double.MaxValue;
 
             foreach (JsonElement item in doc.RootElement.EnumerateArray())
@@ -351,7 +350,7 @@ namespace Incri1_Galang
                     continue;
                 }
 
-                PointLatLng point = new PointLatLng(lat, lon);
+                GeoPoint point = new GeoPoint(lat, lon);
 
                 if (biasPoint == null)
                 {
@@ -386,11 +385,50 @@ namespace Incri1_Galang
             return candidates.Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
-        private static double ComputeSquaredDistance(PointLatLng a, PointLatLng b)
+        private static double ComputeSquaredDistance(GeoPoint a, GeoPoint b)
         {
             double dLat = a.Lat - b.Lat;
             double dLng = a.Lng - b.Lng;
             return (dLat * dLat) + (dLng * dLng);
         }
+
+        private static string BuildMapHtml(string apiKey)
+        {
+            string safeKey = Uri.EscapeDataString(apiKey ?? string.Empty);
+            return MapHtmlTemplate.Replace("__MAPTILER_KEY__", safeKey);
+        }
+
+        private static string LoadMapTilerApiKey()
+        {
+            string? envKey = Environment.GetEnvironmentVariable("MAPTILER_API_KEY");
+            if (!string.IsNullOrWhiteSpace(envKey))
+            {
+                return envKey.Trim();
+            }
+
+            string settingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+            if (!File.Exists(settingsPath))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                using FileStream stream = File.OpenRead(settingsPath);
+                using JsonDocument doc = JsonDocument.Parse(stream);
+                if (doc.RootElement.TryGetProperty("MapTiler", out JsonElement mapTiler) &&
+                    mapTiler.TryGetProperty("ApiKey", out JsonElement apiKey))
+                {
+                    return apiKey.GetString()?.Trim() ?? string.Empty;
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
+
+            return string.Empty;
+        }
     }
+
 }

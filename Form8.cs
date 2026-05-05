@@ -44,7 +44,7 @@ namespace Incri1_Galang
 
             if (string.IsNullOrWhiteSpace(location))
             {
-                MessageBox.Show("Please enter where the unit is stationed.", "Missing Station", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Please enter the unit substation.", "Missing Substation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 textBox2.Focus();
                 return;
             }

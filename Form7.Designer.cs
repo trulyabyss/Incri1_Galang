@@ -45,6 +45,9 @@
             pictureBox1 = new PictureBox();
             button7 = new Button();
             button8 = new Button();
+            button9 = new Button();
+            button10 = new Button();
+            button11 = new Button();
             ((System.ComponentModel.ISupportInitialize)dataGridView1).BeginInit();
             ((System.ComponentModel.ISupportInitialize)pictureBox4).BeginInit();
             ((System.ComponentModel.ISupportInitialize)pictureBox2).BeginInit();
@@ -218,12 +221,45 @@
             button8.UseVisualStyleBackColor = true;
             button8.Click += button8_Click;
             // 
+            // button9
+            // 
+            button9.Location = new Point(444, 416);
+            button9.Name = "button9";
+            button9.Size = new Size(90, 23);
+            button9.TabIndex = 28;
+            button9.Text = "REPORTS";
+            button9.UseVisualStyleBackColor = true;
+            button9.Click += button9_Click;
+            // 
+            // button10
+            // 
+            button10.BackColor = Color.PaleGreen;
+            button10.Location = new Point(33, 416);
+            button10.Name = "button10";
+            button10.Size = new Size(190, 23);
+            button10.TabIndex = 29;
+            button10.Text = "VIEW USERS";
+            button10.UseVisualStyleBackColor = false;
+            button10.Click += button10_Click;
+            // 
+            // button11
+            // 
+            button11.Location = new Point(652, 94);
+            button11.Name = "button11";
+            button11.Size = new Size(90, 23);
+            button11.TabIndex = 30;
+            button11.Text = "OPEN CHAT";
+            button11.UseVisualStyleBackColor = true;
+            // 
             // Form7
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(754, 450);
+            Controls.Add(button11);
+            Controls.Add(button10);
             Controls.Add(button8);
+            Controls.Add(button9);
             Controls.Add(button7);
             Controls.Add(pictureBox4);
             Controls.Add(pictureBox2);
@@ -266,5 +302,8 @@
         private PictureBox pictureBox1;
         private Button button7;
         private Button button8;
+        private Button button9;
+        private Button button10;
+        private Button button11;
     }
 }

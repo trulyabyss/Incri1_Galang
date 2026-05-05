@@ -30,20 +30,19 @@
         {
             panelTop = new Panel();
             lblRouteInfo = new Label();
-            btnPlotRoute = new Button();
             txtIncidentLocation = new TextBox();
             label2 = new Label();
             comboUnits = new ComboBox();
             label1 = new Label();
-            mapControl = new GMap.NET.WindowsForms.GMapControl();
+            mapView = new Microsoft.Web.WebView2.WinForms.WebView2();
             panelTop.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)mapView).BeginInit();
             SuspendLayout();
             // 
             // panelTop
             // 
             panelTop.BackColor = SystemColors.ControlLight;
             panelTop.Controls.Add(lblRouteInfo);
-            panelTop.Controls.Add(btnPlotRoute);
             panelTop.Controls.Add(txtIncidentLocation);
             panelTop.Controls.Add(label2);
             panelTop.Controls.Add(comboUnits);
@@ -62,17 +61,7 @@
             lblRouteInfo.Name = "lblRouteInfo";
             lblRouteInfo.Size = new Size(150, 15);
             lblRouteInfo.TabIndex = 5;
-            lblRouteInfo.Text = "Distance: - | ETA: -";
-            // 
-            // btnPlotRoute
-            // 
-            btnPlotRoute.Location = new Point(863, 23);
-            btnPlotRoute.Name = "btnPlotRoute";
-            btnPlotRoute.Size = new Size(119, 31);
-            btnPlotRoute.TabIndex = 4;
-            btnPlotRoute.Text = "Plot Route";
-            btnPlotRoute.UseVisualStyleBackColor = true;
-            btnPlotRoute.Click += btnPlotRoute_Click;
+            lblRouteInfo.Text = "Enter a landmark to pin on the map.";
             // 
             // txtIncidentLocation
             // 
@@ -109,44 +98,31 @@
             label1.TabIndex = 0;
             label1.Text = "Select Unit:";
             // 
-            // mapControl
+            // mapView
             // 
-            mapControl.Bearing = 0F;
-            mapControl.CanDragMap = true;
-            mapControl.Dock = DockStyle.Fill;
-            mapControl.EmptyTileColor = Color.Navy;
-            mapControl.GrayScaleMode = false;
-            mapControl.HelperLineOption = GMap.NET.WindowsForms.HelperLineOptions.DontShow;
-            mapControl.Location = new Point(0, 93);
-            mapControl.MarkersEnabled = true;
-            mapControl.MaxZoom = 2;
-            mapControl.MinZoom = 2;
-            mapControl.MouseWheelZoomEnabled = true;
-            mapControl.MouseWheelZoomType = GMap.NET.MouseWheelZoomType.MousePositionAndCenter;
-            mapControl.Name = "mapControl";
-            mapControl.NegativeMode = false;
-            mapControl.PolygonsEnabled = true;
-            mapControl.RetryLoadTile = 0;
-            mapControl.RoutesEnabled = true;
-            mapControl.ScaleMode = GMap.NET.WindowsForms.ScaleModes.Integer;
-            mapControl.SelectedAreaFillColor = Color.FromArgb(33, 65, 105, 225);
-            mapControl.ShowTileGridLines = false;
-            mapControl.Size = new Size(1000, 557);
-            mapControl.TabIndex = 1;
-            mapControl.Zoom = 0D;
+            mapView.AllowExternalDrop = false;
+            mapView.CreationProperties = null;
+            mapView.DefaultBackgroundColor = Color.White;
+            mapView.Dock = DockStyle.Fill;
+            mapView.Location = new Point(0, 93);
+            mapView.Name = "mapView";
+            mapView.Size = new Size(1000, 557);
+            mapView.TabIndex = 1;
+            mapView.ZoomFactor = 1D;
             // 
             // Form11
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1000, 650);
-            Controls.Add(mapControl);
+            Controls.Add(mapView);
             Controls.Add(panelTop);
             Name = "Form11";
             StartPosition = FormStartPosition.CenterParent;
             Text = "Map Operations";
             panelTop.ResumeLayout(false);
             panelTop.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)mapView).EndInit();
             ResumeLayout(false);
         }
 
@@ -154,11 +130,10 @@
 
         private Panel panelTop;
         private Label lblRouteInfo;
-        private Button btnPlotRoute;
         private TextBox txtIncidentLocation;
         private Label label2;
         private ComboBox comboUnits;
         private Label label1;
-        private GMap.NET.WindowsForms.GMapControl mapControl;
+        private Microsoft.Web.WebView2.WinForms.WebView2 mapView;
     }
 }

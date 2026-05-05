@@ -127,7 +127,7 @@
             label7.Name = "label7";
             label7.Size = new Size(69, 15);
             label7.TabIndex = 19;
-            label7.Text = "STATIONED:";
+            label7.Text = "SUBSTATION:";
             // 
             // textBox2
             // 

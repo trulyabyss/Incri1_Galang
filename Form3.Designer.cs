@@ -42,6 +42,7 @@
             label2 = new Label();
             label3 = new Label();
             label5 = new Label();
+            button11 = new Button();
             ((System.ComponentModel.ISupportInitialize)pictureBox1).BeginInit();
             ((System.ComponentModel.ISupportInitialize)pictureBox2).BeginInit();
             ((System.ComponentModel.ISupportInitialize)pictureBox3).BeginInit();
@@ -166,11 +167,21 @@
             label5.TabIndex = 15;
             label5.Text = "UNDO";
             // 
+            // button11
+            // 
+            button11.Location = new Point(153, 405);
+            button11.Name = "button11";
+            button11.Size = new Size(90, 23);
+            button11.TabIndex = 31;
+            button11.Text = "OPEN CHAT";
+            button11.UseVisualStyleBackColor = true;
+            // 
             // Form3
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(391, 450);
+            Controls.Add(button11);
             Controls.Add(label5);
             Controls.Add(label3);
             Controls.Add(label2);
@@ -209,5 +220,6 @@
         private Label label2;
         private Label label3;
         private Label label5;
+        private Button button11;
     }
 }

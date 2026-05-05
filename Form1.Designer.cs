@@ -37,6 +37,8 @@
             button2 = new Button();
             label4 = new Label();
             label5 = new Label();
+            radioButton1radioButton1 = new RadioButton();
+            radioButton1 = new RadioButton();
             SuspendLayout();
             // 
             // textBox1
@@ -118,11 +120,35 @@
             label5.TabIndex = 8;
             label5.Text = "SYSTEM";
             // 
+            // radioButton1radioButton1
+            // 
+            radioButton1radioButton1.AutoSize = true;
+            radioButton1radioButton1.Location = new Point(103, 387);
+            radioButton1radioButton1.Name = "radioButton1radioButton1";
+            radioButton1radioButton1.Size = new Size(70, 19);
+            radioButton1radioButton1.TabIndex = 9;
+            radioButton1radioButton1.TabStop = true;
+            radioButton1radioButton1.Text = "Resident";
+            radioButton1radioButton1.UseVisualStyleBackColor = true;
+            // 
+            // radioButton1
+            // 
+            radioButton1.AutoSize = true;
+            radioButton1.Location = new Point(238, 387);
+            radioButton1.Name = "radioButton1";
+            radioButton1.Size = new Size(74, 19);
+            radioButton1.TabIndex = 10;
+            radioButton1.TabStop = true;
+            radioButton1.Text = "Barangay";
+            radioButton1.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(397, 317);
+            ClientSize = new Size(397, 420);
+            Controls.Add(radioButton1);
+            Controls.Add(radioButton1radioButton1);
             Controls.Add(label5);
             Controls.Add(label4);
             Controls.Add(button2);
@@ -151,5 +177,7 @@
         private Button button2;
         private Label label4;
         private Label label5;
+        private RadioButton radioButton1radioButton1;
+        private RadioButton radioButton1;
     }
 }

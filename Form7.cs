@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.OleDb;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -12,8 +11,6 @@ namespace Incri1_Galang
 {
     public partial class Form7 : Form
     {
-        private const string AccessDatabasePath = @"E:\2026GALANG SECONDSEM FINALPROJECT\DatabaseDispatch.accdb";
-
         // Static list ensures data persists across all forms
         public static BindingList<ResponseUnit> GlobalUnitList = new BindingList<ResponseUnit>();
         private readonly BindingSource _unitBindingSource = new BindingSource();
@@ -35,15 +32,39 @@ namespace Incri1_Galang
             dataGridView1.DataSource = _unitBindingSource;
             UnitDatabase.Initialize();
             LoadUnitsFromDatabase();
+
+            UnitDatabase.DataChanged += HandleDataChanged;
+            FormClosed += HandleFormClosed;
+            button11.Click += HandleOpenChat;
+        }
+
+        private void HandleDataChanged(object? sender, EventArgs e)
+        {
+            LoadUnitsFromDatabase();
+        }
+
+        private void HandleFormClosed(object? sender, FormClosedEventArgs e)
+        {
+            UnitDatabase.DataChanged -= HandleDataChanged;
+            FormClosed -= HandleFormClosed;
         }
 
         public void RefreshDataGrid()
         {
             _unitBindingSource.ResetBindings(false);
+            ApplyUnitColumnHeaders(dataGridView1);
 
             if (dataGridView1.Columns.Count > 0)
             {
                 dataGridView1.AutoResizeColumns();
+            }
+        }
+
+        private static void ApplyUnitColumnHeaders(DataGridView grid)
+        {
+            if (grid.Columns["Location"] is DataGridViewColumn locationColumn)
+            {
+                locationColumn.HeaderText = "Substation";
             }
         }
 
@@ -200,7 +221,10 @@ namespace Incri1_Galang
             foreach (DataRow row in tables.Rows)
             {
                 string? tableName = row["TABLE_NAME"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(tableName) && !tableName.StartsWith("MSys", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(tableName)
+                    && !tableName.StartsWith("MSys", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(tableName, UnitDatabase.ApplicationTableName, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(tableName, UnitDatabase.ReportsTableName, StringComparison.OrdinalIgnoreCase))
                 {
                     names.Add(tableName);
                 }
@@ -211,54 +235,77 @@ namespace Incri1_Galang
                 return null;
             }
 
+            List<(string Name, int Score, int Rows)> candidates = new List<(string Name, int Score, int Rows)>();
+            foreach (string tableName in names)
+            {
+                HashSet<string> columns = GetAccessTableColumns(connection, tableName);
+                int score = ComputeAccessTableScore(columns);
+                int rows = GetAccessTableRowCount(connection, tableName);
+                candidates.Add((tableName, score, rows));
+            }
+
+            bool hasNonEmptyTable = candidates.Any(c => c.Rows > 0);
+            IEnumerable<(string Name, int Score, int Rows)> selectable = hasNonEmptyTable
+                ? candidates.Where(c => c.Rows > 0)
+                : candidates;
+
             string[] preferred = { "ResponseUnits", "Units", "Unit", "DispatchUnits", "tblUnits", "tblResponseUnits" };
             foreach (string preferredName in preferred)
             {
-                string? found = names.FirstOrDefault(n => string.Equals(n, preferredName, StringComparison.OrdinalIgnoreCase));
+                string? found = selectable
+                    .Select(c => c.Name)
+                    .FirstOrDefault(n => string.Equals(n, preferredName, StringComparison.OrdinalIgnoreCase));
                 if (found != null)
                 {
                     return found;
                 }
             }
 
-            string bestName = names[0];
+            string bestName = selectable.First().Name;
             int bestScore = -1;
             int bestRows = -1;
 
-            foreach (string tableName in names)
+            foreach ((string Name, int Score, int Rows) candidate in selectable)
             {
-                HashSet<string> columns = GetAccessTableColumns(connection, tableName);
-                int score = ComputeAccessTableScore(columns);
-                int rows = GetAccessTableRowCount(connection, tableName);
-
-                if (score > bestScore || (score == bestScore && rows > bestRows))
+                if (candidate.Score > bestScore || (candidate.Score == bestScore && candidate.Rows > bestRows))
                 {
-                    bestScore = score;
-                    bestRows = rows;
-                    bestName = tableName;
+                    bestScore = candidate.Score;
+                    bestRows = candidate.Rows;
+                    bestName = candidate.Name;
                 }
             }
 
             return bestName;
         }
 
+        private void button10_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                UserDatabase.Initialize();
+                List<string> users = UserDatabase.GetAllUsernames();
+
+                if (users.Count == 0)
+                {
+                    MessageBox.Show("No registered users found.",
+                        "Registered Users", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                string list = string.Join(Environment.NewLine, users);
+                MessageBox.Show(list, "Registered Users", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to load users. " + ex.Message,
+                    "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void LoadUnitsFromAccessDatabase()
         {
-            if (!File.Exists(AccessDatabasePath))
-            {
-                throw new FileNotFoundException("Access database file was not found.", AccessDatabasePath);
-            }
-
-            string[] providerCandidates =
-            {
-                "Microsoft.ACE.OLEDB.16.0",
-                "Microsoft.ACE.OLEDB.12.0"
-            };
-
             List<ResponseUnit> importedUnits = new List<ResponseUnit>();
-            Exception? lastOpenError = null;
-
-            using OleDbConnection connection = OpenAccessConnection(AccessDatabasePath, providerCandidates, out lastOpenError);
+            using OleDbConnection connection = UnitDatabase.CreateOpenConnection();
 
             string? tableName = GetPreferredAccessTableName(connection);
             if (string.IsNullOrWhiteSpace(tableName))
@@ -283,7 +330,7 @@ namespace Incri1_Galang
                     UnitName = ReadStringValue(reader, indexMap, "UnitName", "Unit Name", "Name", "Unit", "ResponderName", "VehicleName"),
                     UnitType = ReadStringValue(reader, indexMap, "UnitType", "Type", "UnitBelongTo", "Unit Belong To", "Category"),
                     Status = ReadStringValue(reader, indexMap, "Status", "UnitStatus", "Availability"),
-                    Location = ReadStringValue(reader, indexMap, "Location", "Station", "StationLocation", "StationedAt", "Address", "BaseLocation"),
+                    Location = ReadStringValue(reader, indexMap, "Location", "Substation", "Sub Station", "Sub-Station", "Station", "StationLocation", "StationedAt", "Address", "BaseLocation"),
                     DateAdded = ReadDateValue(reader, indexMap, "DateAdded", "Date", "Date Added", "CreatedAt"),
                     Resources = ReadStringValue(reader, indexMap, "Resources", "Resource", "Team", "Asset", "Assets"),
                     IncidentLocation = ReadStringValue(reader, indexMap, "IncidentLocation", "Incident", "Incident Location"),
@@ -333,36 +380,6 @@ namespace Incri1_Galang
             }
 
             UnitDatabase.ReplaceAllUnits(importedUnits);
-        }
-
-        private static OleDbConnection OpenAccessConnection(string databasePath, IEnumerable<string> providerCandidates, out Exception? lastError)
-        {
-            lastError = null;
-
-            foreach (string provider in providerCandidates)
-            {
-                string connectionString = $"Provider={provider};Data Source={databasePath};Persist Security Info=False;";
-                OleDbConnection connection = new OleDbConnection(connectionString);
-
-                try
-                {
-                    connection.Open();
-                    return connection;
-                }
-                catch (Exception ex)
-                {
-                    connection.Dispose();
-                    lastError = ex;
-                }
-            }
-
-            string msg = "Microsoft Access provider was not found for this app process. Install Microsoft Access Database Engine (2010/2016) matching app bitness (x64 app -> x64 engine, x86 app -> x86 engine).";
-            if (lastError != null)
-            {
-                msg += "\n\nLast provider error: " + lastError.Message;
-            }
-
-            throw new InvalidOperationException(msg);
         }
 
         // ADD UNIT
@@ -476,11 +493,28 @@ namespace Incri1_Galang
             this.Close(); // Logout
         }
 
+        private void HandleOpenChat(object? sender, EventArgs e)
+        {
+            using ChatForm chatForm = new ChatForm(ChatRole.Admin);
+            chatForm.ShowDialog(this);
+        }
+
         private void button7_Click(object sender, EventArgs e)
         {
             ResponseUnit? selected = GetSelectedUnit();
-            Form11 mapForm = new Form11(selected);
-            mapForm.ShowDialog();
+            try
+            {
+                using Form11 mapForm = new Form11(selected);
+                mapForm.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Unable to open map module. " + ex.Message,
+                    "Map Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
 
         private void button8_Click(object sender, EventArgs e)
@@ -499,6 +533,29 @@ namespace Incri1_Galang
                 AutoSize = true,
                 Location = new Point(16, 14),
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+            };
+
+            Label searchLabel = new Label
+            {
+                AutoSize = true,
+                Location = new Point(620, 14),
+                Text = "Search:",
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            TextBox searchBox = new TextBox
+            {
+                Location = new Point(680, 11),
+                Size = new Size(180, 23),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            Button clearButton = new Button
+            {
+                Text = "CLEAR",
+                Size = new Size(70, 23),
+                Location = new Point(868, 10),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
 
             DataGridView dataGrid = new DataGridView
@@ -521,6 +578,7 @@ namespace Incri1_Galang
                 List<ResponseUnit> units = UnitDatabase.GetAllUnits();
                 dataGrid.DataSource = null;
                 dataGrid.DataSource = units;
+                ApplyUnitColumnHeaders(dataGrid);
 
                 int available = units.Count(u => string.Equals(u.Status, "Available", StringComparison.OrdinalIgnoreCase));
                 int unavailable = units.Count(u => string.Equals(u.Status, "Unavailable", StringComparison.OrdinalIgnoreCase));
@@ -656,6 +714,126 @@ namespace Incri1_Galang
             showDataForm.Controls.Add(deleteButton);
             showDataForm.Controls.Add(closeButton);
             showDataForm.ShowDialog(this);
+        }
+
+        private void button9_Click(object sender, EventArgs e)
+        {
+            Form reportsForm = new Form
+            {
+                Text = "RESIDENT REPORTS",
+                StartPosition = FormStartPosition.CenterParent,
+                Size = new Size(980, 520),
+                MinimumSize = new Size(900, 460)
+            };
+
+            Label summaryLabel = new Label
+            {
+                AutoSize = true,
+                Location = new Point(16, 14),
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+            };
+
+            Label searchLabel = new Label
+            {
+                AutoSize = true,
+                Location = new Point(620, 14),
+                Text = "Search:",
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            TextBox searchBox = new TextBox
+            {
+                Location = new Point(680, 11),
+                Size = new Size(180, 23),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            Button clearButton = new Button
+            {
+                Text = "CLEAR",
+                Size = new Size(70, 23),
+                Location = new Point(868, 10),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            DataGridView dataGrid = new DataGridView
+            {
+                Location = new Point(16, 40),
+                Size = new Size(932, 395),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
+                RowHeadersVisible = false,
+                DataSource = null
+            };
+
+            bool MatchesSearch(ResponseUnit unit, string term)
+            {
+                if (string.IsNullOrWhiteSpace(term))
+                {
+                    return true;
+                }
+
+                return unit.UnitName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.UnitType.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.Status.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.Location.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.IncidentLocation.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.Resources.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || unit.AlarmDescription.Contains(term, StringComparison.OrdinalIgnoreCase);
+            }
+
+            void RefreshReports()
+            {
+                List<ResponseUnit> reports = UnitDatabase.GetAllReports();
+                string term = searchBox.Text.Trim();
+                List<ResponseUnit> filtered = reports
+                    .Where(unit => MatchesSearch(unit, term))
+                    .ToList();
+
+                dataGrid.DataSource = null;
+                dataGrid.DataSource = filtered;
+                ApplyUnitColumnHeaders(dataGrid);
+
+                summaryLabel.Text = string.IsNullOrWhiteSpace(term)
+                    ? $"Total Reports: {reports.Count}"
+                    : $"Total Reports: {filtered.Count} (Filtered from {reports.Count})";
+            }
+
+            Button refreshButton = new Button
+            {
+                Text = "REFRESH",
+                Size = new Size(90, 28),
+                Location = new Point(760, 445),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+            refreshButton.Click += (_, _) => RefreshReports();
+
+            Button closeButton = new Button
+            {
+                Text = "CLOSE",
+                Size = new Size(90, 28),
+                Location = new Point(858, 445),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+            closeButton.Click += (_, _) => reportsForm.Close();
+
+            searchBox.TextChanged += (_, _) => RefreshReports();
+            clearButton.Click += (_, _) => searchBox.Clear();
+
+            RefreshReports();
+            reportsForm.Controls.Add(summaryLabel);
+            reportsForm.Controls.Add(searchLabel);
+            reportsForm.Controls.Add(searchBox);
+            reportsForm.Controls.Add(clearButton);
+            reportsForm.Controls.Add(dataGrid);
+            reportsForm.Controls.Add(refreshButton);
+            reportsForm.Controls.Add(closeButton);
+            reportsForm.ShowDialog(this);
         }
     }
 }
